@@ -37,7 +37,7 @@ public class BlacklistProvider extends ContentProvider {
     private static final boolean DEBUG = true;
 
     private static final String DATABASE_NAME = "blacklist.db";
-    private static final int DATABASE_VERSION = 1;
+    private static final int DATABASE_VERSION = 2;
 
     private static final String BLACKLIST_TABLE = "blacklist";
     private static final String COLUMN_NORMALIZED = "normalized_number";
@@ -74,7 +74,7 @@ public class BlacklistProvider extends ContentProvider {
             db.execSQL("CREATE TABLE " + BLACKLIST_TABLE +
                 "(_id INTEGER PRIMARY KEY," +
                     "number TEXT," +
-                    "normalized_number TEXT UNIQUE," +
+                    "normalized_number TEXT," +
                     "is_regex INTEGER," +
                     "phone INTEGER DEFAULT 0," +
                     "message INTEGER DEFAULT 0);");
@@ -82,7 +82,14 @@ public class BlacklistProvider extends ContentProvider {
 
         @Override
         public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
-            // won't happen, we're at version 1
+            if (oldVersion < 2) {
+                // drop the uniqueness constraint that was present on the DB in V1
+                db.execSQL("ALTER TABLE " + BLACKLIST_TABLE +
+                        " RENAME TO " + BLACKLIST_TABLE + "_old;");
+                onCreate(db);
+                db.execSQL("INSERT INTO " + BLACKLIST_TABLE +
+                        " SELECT * FROM " + BLACKLIST_TABLE + "_old;");
+            }
         }
     }
 
@@ -205,19 +212,28 @@ public class BlacklistProvider extends ContentProvider {
 
         switch (match) {
             case BL_ALL:
-                count = db.delete(BLACKLIST_TABLE, where, whereArgs);
                 break;
             case BL_ID:
-                count = db.delete(BLACKLIST_TABLE, Blacklist._ID + " = ?",
-                        new String[] { uri.getLastPathSegment() });
+                if (where != null || whereArgs != null) {
+                    throw new UnsupportedOperationException(
+                            "Cannot delete URI " + uri + " with a where clause");
+                }
+                where = Blacklist._ID + " = ?";
+                whereArgs = new String[] { uri.getLastPathSegment() };
+                break;
             case BL_NUMBER:
-                count = db.delete(BLACKLIST_TABLE, COLUMN_NORMALIZED + " = ?",
-                        new String[] { normalizeNumber(uri.getLastPathSegment()) });
+                if (where != null || whereArgs != null) {
+                    throw new UnsupportedOperationException(
+                            "Cannot delete URI " + uri + " with a where clause");
+                }
+                where = COLUMN_NORMALIZED + " = ?";
+                whereArgs = new String[] { normalizeNumber(uri.getLastPathSegment()) };
                 break;
             default:
                 throw new UnsupportedOperationException("Cannot delete that URI: " + uri);
         }
 
+        count = db.delete(BLACKLIST_TABLE, where, whereArgs);
         if (DEBUG) Log.d(TAG, "delete result count " + count);
 
         if (count > 0) {
